@@ -10,7 +10,7 @@ project:
 
   # Initial footprint for physical-design exploration.
   # Increase after reviewing placement and routing results.
-  tiles: "1x1"
+  tiles: "4x2"
 
   # Must match the module declaration in tt_um_dataflow.sv
   top_module: "tt_um_dataflow"

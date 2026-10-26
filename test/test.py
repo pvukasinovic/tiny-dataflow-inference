@@ -1,40 +1,88 @@
+
 # SPDX-FileCopyrightText: © 2024 Tiny Tapeout
 # SPDX-License-Identifier: Apache-2.0
 
 import cocotb
 from cocotb.clock import Clock
-from cocotb.triggers import ClockCycles
+from cocotb.triggers import Timer, FallingEdge, RisingEdge
+
+
+async def set_address(dut, address):
+    """Load a 9-bit address into the host interface."""
+
+    # Load low 8 bits
+    await FallingEdge(dut.clk)
+    dut.ui_in.value = address & 0xFF
+    dut.uio_in.value = 0x07  # REQ | WR | ADDR
+
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+    dut.uio_in.value = 0
+
+    # Load high address bit
+    await FallingEdge(dut.clk)
+    dut.ui_in.value = (address >> 8) & 1
+    dut.uio_in.value = 0x0F  # REQ | WR | ADDR | HI
+
+    await RisingEdge(dut.clk)
+    await Timer(1, unit="ns")
+    dut.uio_in.value = 0
+
+
+async def read_register(dut, address):
+    """Read a register through the external host interface."""
+    await set_address(dut, address)
+    await Timer(2, unit="ns")
+    return int(dut.uo_out.value)
 
 
 @cocotb.test()
 async def test_project(dut):
-    dut._log.info("Start")
 
-    # Set the clock period to 10 us (100 KHz)
-    clock = Clock(dut.clk, 10, unit="us")
-    cocotb.start_soon(clock.start())
+    dut._log.info("Starting Tiny Dataflow Inference Processor test")
 
-    # Reset
-    dut._log.info("Reset")
+    # 10 MHz clock: 100 ns period
+    dut.clk.value = 0
     dut.ena.value = 1
+    dut.rst_n.value = 0
     dut.ui_in.value = 0
     dut.uio_in.value = 0
-    dut.rst_n.value = 0
-    await ClockCycles(dut.clk, 10)
+
+    cocotb.start_soon(Clock(dut.clk, 100, unit="ns").start())
+
+    # Reset for five clock cycles
+    for _ in range(5):
+        await RisingEdge(dut.clk)
+
+    await FallingEdge(dut.clk)
     dut.rst_n.value = 1
 
-    dut._log.info("Test project behavior")
+    await Timer(2, unit="ns")
 
-    # Set the input values you want to test
-    dut.ui_in.value = 20
-    dut.uio_in.value = 30
+    # Test 1: READY
+    assert int(dut.uio_out.value) & 0x10, "READY not asserted"
+    assert int(dut.uio_oe.value) == 0xF0, "Incorrect GPIO output enables"
+    dut._log.info("PASS: READY and GPIO direction")
 
-    # Wait for one clock cycle to see the output values
-    await ClockCycles(dut.clk, 1)
+    # Test 2: Device ID
+    device_id = await read_register(dut, 0x000)
+    assert device_id == 0xC1, (
+        f"DEVICE_ID expected 0xC1, got 0x{device_id:02X}"
+    )
+    dut._log.info("PASS: DEVICE_ID = 0xC1")
 
-    # The following assersion is just an example of how to check the output values.
-    # Change it to match the actual expected output of your module:
-    assert dut.uo_out.value == 50
+    # Test 3: ISA version
+    version = await read_register(dut, 0x001)
+    assert version == 0x10, (
+        f"ISA_VERSION expected 0x10, got 0x{version:02X}"
+    )
+    dut._log.info("PASS: ISA_VERSION = 0x10")
 
-    # Keep testing the module by changing the input values, waiting for
-    # one or more clock cycles, and asserting the expected output values.
+    # Test 4: Idle status
+    status = await read_register(dut, 0x002)
+    assert (status & 0x03) == 0, (
+        f"Expected idle status, got 0x{status:02X}"
+    )
+    dut._log.info("PASS: Processor idle")
+
+    dut._log.info("SUCCESS: All host interface tests passed")

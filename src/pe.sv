@@ -93,7 +93,7 @@ module pe (
                     3'b000: R_out <= R_out;
                     3'b001: R_out <= A;
                     3'b010: R_out <= add_result[15:0];
-                    3'b011: R_out <= mul_result;
+                    3'b011: R_out <= {{8{mul_result[7]}}, mul_result};
                     3'b100: R_out <= add_result[15:0];
                     3'b101: R_out <= A >= B ? A : B;
                     3'b110: R_out <= A >>> shift_amt;
